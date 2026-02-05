@@ -1,0 +1,36 @@
+/* Schedule TUI Stylesheet */
+
+Screen {
+    layout: vertical;
+    background: $surface;
+    color: $text;
+}
+
+Header {
+    dock: top;
+    height: 3;
+    background: $panel;
+    color: $text;
+    border: heavy $primary;
+}
+
+Footer {
+    dock: bottom;
+    height: auto;
+    background: $panel;
+    color: $text;
+    border: heavy $primary;
+}
+
+DataTable {
+    border: heavy $primary;
+    background: $surface;
+    color: $text;
+}
+
+Modal {
+    align: center middle;
+    border: heavy $accent;
+    background: $panel;
+    color: $text;
+}
