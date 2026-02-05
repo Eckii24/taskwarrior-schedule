@@ -8,7 +8,7 @@ Screen {
 
 Header {
     dock: top;
-    height: 3;
+    height: 5;
     background: $panel;
     color: $text;
     border: heavy $primary;
@@ -17,15 +17,18 @@ Header {
 Footer {
     dock: bottom;
     height: auto;
+    min-height: 5;
     background: $panel;
     color: $text;
     border: heavy $primary;
+    padding: 1 2;
 }
 
 DataTable {
-    border: heavy $primary;
     background: $surface;
     color: $text;
+    padding: 1 2;
+    margin: 0 0;
 }
 
 Modal {

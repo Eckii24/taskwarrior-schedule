@@ -5,7 +5,7 @@ import re
 import shlex
 import subprocess
 import time
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 
 class TaskWarriorClient:
@@ -16,7 +16,7 @@ class TaskWarriorClient:
         self.command = "task"
         self._report_cache: Optional[Set[str]] = None
         self._report_cache_time: float = 0.0
-        self._report_cache_ttl: float = 15.0  # 15 seconds cache TTL
+        self._report_cache_ttl: float = 15.0
 
     def get_report_names(self) -> Set[str]:
         """Get available TaskWarrior report names.
@@ -41,6 +41,8 @@ class TaskWarriorClient:
             [self.command, "rc.confirmation=off", "rc.hooks=0", "_config"],
             capture_output=True,
             text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=10,
         )
 
         if result.returncode != 0:
@@ -50,7 +52,6 @@ class TaskWarriorClient:
                 result.stderr,
             )
 
-        # Parse report names using regex: report.<name>.<field>=value or report.<name>.<field>
         report_names = set()
         for line in result.stdout.splitlines():
             match = re.match(r"^report\.([^.]+)\.[^=]+(?:=|$)", line)
@@ -81,49 +82,41 @@ class TaskWarriorClient:
         Raises:
             subprocess.CalledProcessError: If TaskWarrior command fails
         """
-        # Default to "next" if not provided (preserve "" as valid filter for "export all")
         normalized = "next" if filter_or_report is None else filter_or_report.strip()
 
-        # Tokenize input
         tokens = normalized.split() if normalized else []
 
-        # Determine if last token is a report name
         report = None
         filter_tokens = []
 
         if tokens:
-            # Fetch known report names (cached)
             report_names = self.get_report_names()
             maybe_report = tokens[-1]
 
             if maybe_report in report_names:
-                # Last token is a report
                 report = maybe_report
                 filter_tokens = tokens[:-1]
             else:
-                # Not a report, treat entire string as filter
                 filter_tokens = tokens
 
-        # Build command arguments
         cmd = [self.command, "rc.confirmation=off", "rc.hooks=0"]
 
         if report:
-            # Format: task <filters...> export <report>
             if filter_tokens:
                 cmd.extend(filter_tokens)
             cmd.extend(["export", report])
         elif normalized:
-            # Format: task <filter> export
             cmd.extend(tokens)
             cmd.append("export")
         else:
-            # Format: task export (export all)
             cmd.append("export")
 
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=30,
         )
 
         if result.returncode != 0:
@@ -131,7 +124,7 @@ class TaskWarriorClient:
 
         return json.loads(result.stdout)
 
-    def modify_task(self, uuid: str, **modifications: Any) -> bool:
+    def modify_task(self, uuid: str, **modifications: Any) -> Tuple[bool, str]:
         """Modify a task in TaskWarrior.
 
         Runs `task uuid:<uuid> modify key:value ...` with confirmation disabled.
@@ -141,11 +134,13 @@ class TaskWarriorClient:
             **modifications: Key-value pairs for task fields (e.g., scheduled='tomorrow')
 
         Returns:
-            True if successful, False if modification fails
+            Tuple of (success: bool, stderr: str)
         """
         cmd = [
             self.command,
             "rc.confirmation=off",
+            "rc.bulk=0",
+            "rc.recurrence.confirmation=no",
             "rc.hooks=0",
             f"uuid:{uuid}",
             "modify",
@@ -157,6 +152,8 @@ class TaskWarriorClient:
             cmd,
             capture_output=True,
             text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=10,
         )
 
-        return result.returncode == 0
+        return (result.returncode == 0, result.stderr)

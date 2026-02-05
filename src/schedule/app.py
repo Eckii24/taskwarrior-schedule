@@ -1,13 +1,25 @@
 """Main Textual application for the schedule TUI."""
 
 from textual.app import ComposeResult, App
-from textual.binding import Binding
-from textual.widgets import Header, Footer, DataTable, Static
+from textual.binding import Binding, BindingsMap
+from textual.widgets import Footer, DataTable, Static
 from textual.notifications import Notification
+from datetime import datetime
 
 from schedule.config import load_config, DateFieldManager
 from schedule.taskwarrior import TaskWarriorClient
 from schedule.widgets.report_modal import ReportModal
+from schedule.widgets.custom_header import CustomHeader
+
+
+def format_date(date_str: str) -> str:
+    if not date_str or date_str == "-":
+        return "-"
+    try:
+        dt = datetime.strptime(date_str[:8], "%Y%m%d")
+        return dt.strftime("%a %d-%m-%Y")
+    except (ValueError, IndexError):
+        return date_str
 
 
 class ScheduleApp(App):
@@ -16,52 +28,90 @@ class ScheduleApp(App):
     TITLE = "Schedule"
     SUBTITLE = "TaskWarrior Task Rescheduler"
 
+    CSS_PATH = "app.tcss"
+
     BINDINGS = [
-        Binding("q", "quit", "Quit", show=True),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
-        Binding("tab", "toggle_selection", "Select", show=False),
-        Binding("shift+a", "select_all", "All", show=False),
-        # Hotkey scheduling bindings
-        Binding("0", "clear_date", "0=Clear", show=True),
+        Binding("tab", "toggle_selection", "Select", show=True),
+        Binding("shift+a", "select_all", "All", show=True),
+        Binding("s", "toggle_scheduled", "scheduled", show=True),
+        Binding("d", "toggle_due", "due", show=True),
+        Binding("w", "toggle_wait", "wait", show=True),
+        Binding("0", "clear_date", "clear", show=True),
         Binding("1", "schedule_1", "1", show=True),
         Binding("2", "schedule_2", "2", show=True),
         Binding("3", "schedule_3", "3", show=True),
         Binding("4", "schedule_4", "4", show=True),
         Binding("5", "schedule_5", "5", show=True),
-        Binding("6", "schedule_6", "6", show=True),
-        Binding("7", "schedule_7", "7", show=True),
-        Binding("8", "schedule_8", "8", show=True),
-        Binding("9", "schedule_9", "9", show=True),
-        # Date field toggles
-        Binding("w", "toggle_wait", "W=Wait", show=True),
-        Binding("s", "toggle_scheduled", "S=Sched", show=True),
-        Binding("d", "toggle_due", "D=Due", show=True),
-        # Report modal
-        Binding("r", "change_report", "R=Report", show=True),
+        Binding("6", "schedule_6", "6", show=False),
+        Binding("7", "schedule_7", "7", show=False),
+        Binding("8", "schedule_8", "8", show=False),
+        Binding("9", "schedule_9", "9", show=False),
+        Binding("r", "change_filter", "filter", show=True),
+        Binding("q", "quit", "Quit", show=True),
     ]
 
     def __init__(self):
-        super().__init__()
         self.config = load_config()
-        self.tw_client = TaskWarriorClient()
         self.date_field_mgr = DateFieldManager(
             self.config.get("default_date_fields", ["scheduled"])
         )
         self.current_filter = self.config.get("default_report", "next")
+
+        super().__init__()
+
+        self._update_binding_descriptions()
+
+        self.tw_client = TaskWarriorClient()
         self.tasks = []
         self.selected_tasks: set[str] = set()
         self.columns_added = False
 
-        self._update_hotkey_bindings()
+    def _update_binding_descriptions(self) -> None:
+        hotkeys = self.config.get("hotkeys", {})
+        updated_bindings = []
+
+        for _, binding in self._bindings:
+            if binding.action.startswith("schedule_") and len(binding.action) == 10:
+                key = binding.action[-1]
+                if key in hotkeys:
+                    updated_bindings.append(
+                        Binding(
+                            binding.key,
+                            binding.action,
+                            hotkeys[key],
+                            show=True,
+                            key_display=binding.key_display,
+                            priority=binding.priority,
+                            tooltip=binding.tooltip,
+                        )
+                    )
+                else:
+                    updated_bindings.append(
+                        Binding(
+                            binding.key,
+                            binding.action,
+                            binding.description,
+                            show=False,
+                            key_display=binding.key_display,
+                            priority=binding.priority,
+                            tooltip=binding.tooltip,
+                        )
+                    )
+            else:
+                updated_bindings.append(binding)
+
+        self._bindings = BindingsMap(updated_bindings)
+        self.refresh_bindings()
 
     def compose(self) -> ComposeResult:
-        """Compose the application UI."""
-        yield Header()
-        yield Static(
-            f"Filter: {self.current_filter} | Active: {', '.join(self.date_field_mgr.get_active())}",
-            id="info-bar",
+        active_fields = (
+            ", ".join(self.date_field_mgr.get_active())
+            if self.date_field_mgr.get_active()
+            else "None"
         )
+        yield CustomHeader(filter_text=self.current_filter, active_fields=active_fields)
         yield DataTable(id="task-table", cursor_type="row")
         yield Footer()
 
@@ -87,9 +137,9 @@ class ScheduleApp(App):
                         str(task.get("id", "")),
                         task.get("description", "")[:50],
                         task.get("project", ""),
-                        task.get("scheduled", "-"),
-                        task.get("due", "-"),
-                        task.get("wait", "-"),
+                        format_date(task.get("scheduled", "-")),
+                        format_date(task.get("due", "-")),
+                        format_date(task.get("wait", "-")),
                     ]
                     table.add_row(*row_data, key=task_uuid)
             else:
@@ -189,12 +239,13 @@ class ScheduleApp(App):
                 self._update_row_styling(task_uuid, str(task.get("id", "")))
 
     def _update_info_bar(self) -> None:
-        """Update info bar to show active date fields."""
-        info_bar = self.query_one("#info-bar", Static)
-        active_fields = self.date_field_mgr.get_active()
-        info_bar.update(
-            f"Filter: {self.current_filter} | Active: {', '.join(active_fields) if active_fields else 'None'}"
+        header = self.query_one(CustomHeader)
+        active_fields = (
+            ", ".join(self.date_field_mgr.get_active())
+            if self.date_field_mgr.get_active()
+            else "None"
         )
+        header.update_status(self.current_filter, active_fields)
 
     def refresh_tasks(self) -> None:
         try:
@@ -216,9 +267,9 @@ class ScheduleApp(App):
                         str(task.get("id", "")),
                         task.get("description", "")[:50],
                         task.get("project", ""),
-                        task.get("scheduled", "-"),
-                        task.get("due", "-"),
-                        task.get("wait", "-"),
+                        format_date(task.get("scheduled", "-")),
+                        format_date(task.get("due", "-")),
+                        format_date(task.get("wait", "-")),
                     ]
                     table.add_row(*row_data, key=task_uuid)
 
@@ -262,10 +313,17 @@ class ScheduleApp(App):
 
         for uuid in selected_uuids:
             modifications = {field: "" for field in self.date_field_mgr.get_active()}
-            success = self.tw_client.modify_task(uuid, **modifications)
+            success, stderr = self.tw_client.modify_task(uuid, **modifications)
             if not success:
-                self.log(f"Failed to clear dates for task {uuid}", exc_info=True)
-                self._show_error(f"Failed to clear dates for task {uuid[:8]}")
+                self.log(
+                    f"Failed to clear dates for task {uuid}: {stderr}", exc_info=True
+                )
+                error_msg = (
+                    f"Failed to clear dates: {stderr}"
+                    if stderr
+                    else f"Failed to clear dates for task {uuid[:8]}"
+                )
+                self._show_error(error_msg)
 
         self.clear_selection()
         self.refresh_tasks()
@@ -316,15 +374,20 @@ class ScheduleApp(App):
 
         for uuid in selected_uuids:
             modifications = {field: hotkey_value for field in active_fields}
-            success = self.tw_client.modify_task(uuid, **modifications)
+            success, stderr = self.tw_client.modify_task(uuid, **modifications)
             if not success:
-                self.log(f"Failed to schedule task {uuid}", exc_info=True)
-                self._show_error(f"Failed to schedule task {uuid[:8]}")
+                self.log(f"Failed to schedule task {uuid}: {stderr}", exc_info=True)
+                error_msg = (
+                    f"Failed to schedule: {stderr}"
+                    if stderr
+                    else f"Failed to schedule task {uuid[:8]}"
+                )
+                self._show_error(error_msg)
 
         self.clear_selection()
         self.refresh_tasks()
 
-    def action_change_report(self) -> None:
+    def action_change_filter(self) -> None:
         def on_report_result(result: str | None) -> None:
             if result is not None:
                 self.current_filter = result
@@ -332,7 +395,3 @@ class ScheduleApp(App):
                 self.refresh_tasks()
 
         self.push_screen(ReportModal(), callback=on_report_result)
-
-    def _update_hotkey_bindings(self) -> None:
-        """Update hotkey binding descriptions based on config."""
-        pass
