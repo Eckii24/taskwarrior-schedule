@@ -86,3 +86,34 @@ def load_config() -> Dict[str, Any]:
         result.update(file_config)
 
     return result
+
+
+class DateFieldManager:
+    """Manages active date fields (scheduled, due, wait) for batch operations."""
+
+    def __init__(self, active_fields: list[str] | None = None) -> None:
+        """Initialize date field manager.
+
+        Args:
+            active_fields: List of active date field names (e.g., ["scheduled", "due"])
+        """
+        self.active_fields: set[str] = set(active_fields) if active_fields else set()
+
+    def get_active(self) -> list[str]:
+        """Get list of active date field names.
+
+        Returns:
+            Sorted list of active field names
+        """
+        return sorted(self.active_fields)
+
+    def toggle(self, field: str) -> None:
+        """Toggle a date field on/off.
+
+        Args:
+            field: Field name to toggle (e.g., "scheduled")
+        """
+        if field in self.active_fields:
+            self.active_fields.discard(field)
+        else:
+            self.active_fields.add(field)
