@@ -65,16 +65,16 @@ Eine fokussierte TUI-Anwendung, die das repetitive Reschedulen von TaskWarrior T
 - Config File Support: `~/.config/schedule/config.yaml`
 
 ### Definition of Done
-- [ ] `uv tool install .` installiert das Tool erfolgreich
-- [ ] `schedule` startet die TUI ohne Fehler
-- [ ] Tasks werden aus dem konfigurierten Report geladen
-- [ ] Hotkeys 1-9 und 0 modifizieren Tasks korrekt
-- [ ] W/S/D Toggles funktionieren additiv
-- [ ] R öffnet Report-Änderung Popup
-- [ ] Tab markiert/demarkiert Tasks für Batch-Operationen
-- [ ] Shift+A markiert alle sichtbaren Tasks
-- [ ] Hotkeys 1-9, 0 wirken auf alle markierten Tasks
-- [ ] Nach Batch-Operation werden Tasks automatisch deselektiert
+- [x] `uv tool install .` installiert das Tool erfolgreich
+- [x] `schedule` startet die TUI ohne Fehler
+- [x] Tasks werden aus dem konfigurierten Report geladen
+- [x] Hotkeys 1-9 und 0 modifizieren Tasks korrekt
+- [x] W/S/D Toggles funktionieren additiv
+- [x] R öffnet Report-Änderung Popup
+- [x] Tab markiert/demarkiert Tasks für Batch-Operationen
+- [x] Shift+A markiert alle sichtbaren Tasks
+- [x] Hotkeys 1-9, 0 wirken auf alle markierten Tasks
+- [x] Nach Batch-Operation werden Tasks automatisch deselektiert
 
 ### Must Have
 - Hotkeys 1-9 für Scheduling + 0 für Clear
@@ -630,7 +630,7 @@ Parallel Speedup: ~40% faster than sequential
 
 ---
 
-- [ ] 5b. Multi-Select System
+- [x] 5b. Multi-Select System
 
   **What to do**:
   - Implement task selection state management
@@ -743,7 +743,7 @@ Parallel Speedup: ~40% faster than sequential
 
 ---
 
-- [ ] 6. Hotkey System (with Batch Support)
+- [x] 6. Hotkey System (with Batch Support)
 
   **What to do**:
   - Implement key bindings in App:
@@ -889,7 +889,7 @@ Parallel Speedup: ~40% faster than sequential
 
 ---
 
-- [ ] 7. Report Change Modal
+- [x] 7. Report Change Modal
 
   **What to do**:
   - Create `ReportModal` as `ModalScreen` subclass
@@ -966,7 +966,7 @@ Parallel Speedup: ~40% faster than sequential
 
 ---
 
-- [ ] 8. Integration, Polish & Final Verification
+- [x] 8. Integration, Polish & Final Verification
 
   **What to do**:
   - Ensure all components work together
@@ -1104,17 +1104,17 @@ SCHEDULE_CONFIG_FILE=/tmp/test.yaml schedule
 ```
 
 ### Final Checklist
-- [ ] All "Must Have" features present and working
-- [ ] All "Must NOT Have" exclusions respected (no extras)
-- [ ] App installable via `uv tool install .`
-- [ ] Config loads from XDG path and ENV override
-- [ ] Hotkeys 1-9 + 0 modify correct date fields
-- [ ] W/S/D toggles work additively
-- [ ] R opens report modal
-- [ ] j/k and arrow navigation works
-- [ ] q quits the app
-- [ ] Errors show as toast notifications
-- [ ] **Tab toggles task selection**
-- [ ] **Shift+A selects all visible tasks**
-- [ ] **Hotkeys work on all selected tasks (batch)**
-- [ ] **Selection clears after batch operation**
+- [x] All "Must Have" features present and working
+- [x] All "Must NOT Have" exclusions respected (no extras)
+- [x] App installable via `uv tool install .`
+- [x] Config loads from XDG path and ENV override
+- [x] Hotkeys 1-9 + 0 modify correct date fields
+- [x] W/S/D toggles work additively
+- [x] R opens report modal
+- [x] j/k and arrow navigation works
+- [x] q quits the app
+- [x] Errors show as toast notifications
+- [x] **Tab toggles task selection**
+- [x] **Shift+A selects all visible tasks**
+- [x] **Hotkeys work on all selected tasks (batch)**
+- [x] **Selection clears after batch operation**
