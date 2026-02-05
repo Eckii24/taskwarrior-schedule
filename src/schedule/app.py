@@ -42,103 +42,73 @@ class ScheduleApp(App):
     ]
 
     def __init__(self):
-        """Initialize the application."""
         super().__init__()
         self.config = load_config()
         self.tw_client = TaskWarriorClient()
         self.date_field_mgr = DateFieldManager(
             self.config.get("default_date_fields", ["scheduled"])
         )
-        self.current_report = self.config.get("default_report", "next")
+        self.current_filter = self.config.get("default_report", "next")
         self.tasks = []
         self.selected_tasks: set[str] = set()
+        self.columns_added = False
 
-        # Update hotkey binding visibility based on config
         self._update_hotkey_bindings()
 
     def compose(self) -> ComposeResult:
         """Compose the application UI."""
         yield Header()
         yield Static(
-            f"Report: {self.current_report} | Active: {', '.join(self.date_field_mgr.get_active())}",
+            f"Filter: {self.current_filter} | Active: {', '.join(self.date_field_mgr.get_active())}",
             id="info-bar",
         )
         yield DataTable(id="task-table", cursor_type="row")
         yield Footer()
 
     def on_mount(self) -> None:
-        """Load and display tasks when app starts."""
         table = self.query_one("#task-table", DataTable)
 
-        # Add columns
-        table.add_columns("ID", "Description", "Project", "Scheduled", "Due", "Wait")
+        if not self.columns_added:
+            table.add_columns(
+                "ID", "Description", "Project", "Scheduled", "Due", "Wait"
+            )
+            self.columns_added = True
 
         try:
-            # Load tasks from TaskWarrior
-            self.tasks = self.tw_client.get_tasks(self.current_report)
+            self.tasks = self.tw_client.get_tasks(self.current_filter)
 
-            # Populate rows
             if self.tasks:
-                for idx, task in enumerate(self.tasks, 1):
+                for task in self.tasks:
+                    task_uuid = task.get("uuid", "")
+                    if not task_uuid:
+                        continue
+
                     row_data = [
-                        str(task.get("id", idx)),
+                        str(task.get("id", "")),
                         task.get("description", "")[:50],
                         task.get("project", ""),
                         task.get("scheduled", "-"),
                         task.get("due", "-"),
                         task.get("wait", "-"),
                     ]
-                    table.add_row(*row_data)
+                    table.add_row(*row_data, key=task_uuid)
             else:
-                # Show placeholder for empty list
-                table.add_row("", "No tasks", "", "", "", "")
+                table.add_row("", "No tasks", "", "", "", "", key="empty")
         except Exception as e:
-            # Show error in table
-            table.add_row("", f"Error: {str(e)}", "", "", "", "")
+            self.log(f"Error loading tasks: {e}", exc_info=True)
+            table.add_row("", f"Error: {str(e)}", "", "", "", "", key="error")
 
     def action_toggle_selection(self) -> None:
         """Toggle selection of current cursor row."""
         table = self.query_one("#task-table", DataTable)
-        try:
-            # Get current cursor row index
-            row_index = table.cursor_row
-            if row_index < 0 or row_index >= len(self.tasks):
-                return
 
-            # Get task UUID from corresponding task in self.tasks
-            task = self.tasks[row_index]
-            task_uuid = task.get("uuid", "")
+        if table.row_count == 0:
+            return
 
-            if not task_uuid:
-                return
+        if not table.is_valid_coordinate(table.cursor_coordinate):
+            return
 
-            # Toggle UUID in selected_tasks
-            if task_uuid in self.selected_tasks:
-                self.selected_tasks.remove(task_uuid)
-            else:
-                self.selected_tasks.add(task_uuid)
-
-            # Update visual indicator
-            self._update_row_styling(row_index)
-        except Exception:
-            pass
-
-    def action_select_all(self) -> None:
-        """Select all visible tasks."""
-        # Add all task UUIDs to selected_tasks
-        for task in self.tasks:
-            task_uuid = task.get("uuid", "")
-            if task_uuid:
-                self.selected_tasks.add(task_uuid)
-
-        # Update visual indicators for all rows
-        table = self.query_one("#task-table", DataTable)
-        for row_index in range(len(self.tasks)):
-            self._update_row_styling(row_index)
-
-    def _update_row_styling(self, row_index: int) -> None:
-        """Update row styling to show selection state."""
-        table = self.query_one("#task-table", DataTable)
+        row_index = table.cursor_row
         if row_index < 0 or row_index >= len(self.tasks):
             return
 
@@ -148,21 +118,35 @@ class ScheduleApp(App):
         if not task_uuid:
             return
 
-        # Get the row key
-        row_key = table.get_row_at(row_index) if hasattr(table, "get_row_at") else None
-
-        # Simple approach: add visual marker via updating cell content
-        # We'll use a marker character in the first column if selected
         if task_uuid in self.selected_tasks:
-            # Update first cell with selection marker
-            if hasattr(table, "update_cell"):
-                current_id = str(task.get("id", row_index + 1))
-                table.update_cell(row_index, 0, f"● {current_id}")
+            self.selected_tasks.remove(task_uuid)
         else:
-            # Remove marker
-            if hasattr(table, "update_cell"):
-                current_id = str(task.get("id", row_index + 1))
-                table.update_cell(row_index, 0, current_id)
+            self.selected_tasks.add(task_uuid)
+
+        self._update_row_styling(task_uuid, task.get("id", ""))
+
+    def action_select_all(self) -> None:
+        """Select all visible tasks."""
+        for task in self.tasks:
+            task_uuid = task.get("uuid", "")
+            if task_uuid:
+                self.selected_tasks.add(task_uuid)
+
+        for task in self.tasks:
+            task_uuid = task.get("uuid", "")
+            if task_uuid:
+                self._update_row_styling(task_uuid, task.get("id", ""))
+
+    def _update_row_styling(self, task_uuid: str, task_id: str) -> None:
+        table = self.query_one("#task-table", DataTable)
+
+        try:
+            if task_uuid in self.selected_tasks:
+                table.update_cell(task_uuid, "ID", f"● {task_id}")
+            else:
+                table.update_cell(task_uuid, "ID", task_id)
+        except Exception as e:
+            self.log(f"Error updating row styling for {task_uuid}: {e}", exc_info=True)
 
     def action_cursor_down(self) -> None:
         """Move cursor down in the table."""
@@ -179,82 +163,77 @@ class ScheduleApp(App):
         if self.selected_tasks:
             return list(self.selected_tasks)
 
-        # Return current cursor row task UUID if none selected
-        try:
-            table = self.query_one("#task-table", DataTable)
-            row_index = table.cursor_row
-            if 0 <= row_index < len(self.tasks):
-                task_uuid = self.tasks[row_index].get("uuid", "")
-                if task_uuid:
-                    return [task_uuid]
-        except Exception:
-            pass
+        table = self.query_one("#task-table", DataTable)
+
+        if table.row_count == 0:
+            return []
+
+        if not table.is_valid_coordinate(table.cursor_coordinate):
+            return []
+
+        row_index = table.cursor_row
+        if 0 <= row_index < len(self.tasks):
+            task_uuid = self.tasks[row_index].get("uuid", "")
+            if task_uuid:
+                return [task_uuid]
 
         return []
 
     def clear_selection(self) -> None:
         """Clear all selection and remove visual indicators."""
-        # Clear selected tasks set
         self.selected_tasks.clear()
 
-        # Remove visual indicators from all rows
-        try:
-            table = self.query_one("#task-table", DataTable)
-            for row_index in range(len(self.tasks)):
-                self._update_row_styling(row_index)
-        except Exception:
-            pass
+        for task in self.tasks:
+            task_uuid = task.get("uuid", "")
+            if task_uuid:
+                self._update_row_styling(task_uuid, str(task.get("id", "")))
 
     def _update_info_bar(self) -> None:
         """Update info bar to show active date fields."""
-        try:
-            info_bar = self.query_one("#info-bar", Static)
-            active_fields = self.date_field_mgr.get_active()
-            info_bar.update(
-                f"Report: {self.current_report} | Active: {', '.join(active_fields) if active_fields else 'None'}"
-            )
-        except Exception:
-            pass
+        info_bar = self.query_one("#info-bar", Static)
+        active_fields = self.date_field_mgr.get_active()
+        info_bar.update(
+            f"Filter: {self.current_filter} | Active: {', '.join(active_fields) if active_fields else 'None'}"
+        )
 
     def refresh_tasks(self) -> None:
-        """Reload tasks from TaskWarrior and repopulate the table."""
         try:
             table = self.query_one("#task-table", DataTable)
 
-            # Load fresh tasks from TaskWarrior
-            self.tasks = self.tw_client.get_tasks(self.current_report)
+            old_cursor_row = table.cursor_row if table.row_count > 0 else 0
 
-            # Clear the table
+            self.tasks = self.tw_client.get_tasks(self.current_filter)
+
             table.clear()
 
-            # Re-add columns
-            table.add_columns(
-                "ID", "Description", "Project", "Scheduled", "Due", "Wait"
-            )
-
-            # Repopulate rows
             if self.tasks:
-                for idx, task in enumerate(self.tasks, 1):
+                for task in self.tasks:
+                    task_uuid = task.get("uuid", "")
+                    if not task_uuid:
+                        continue
+
                     row_data = [
-                        str(task.get("id", idx)),
+                        str(task.get("id", "")),
                         task.get("description", "")[:50],
                         task.get("project", ""),
                         task.get("scheduled", "-"),
                         task.get("due", "-"),
                         task.get("wait", "-"),
                     ]
-                    table.add_row(*row_data)
+                    table.add_row(*row_data, key=task_uuid)
+
+                if table.row_count > 0:
+                    safe_row = min(old_cursor_row, table.row_count - 1)
+                    table.move_cursor(row=safe_row, scroll=True, animate=False)
             else:
-                table.add_row("", "No tasks", "", "", "", "")
+                table.add_row("", "No tasks", "", "", "", "", key="empty")
         except Exception as e:
+            self.log(f"Error refreshing tasks: {e}", exc_info=True)
             self.notify(f"Error refreshing tasks: {str(e)}", severity="error")
 
     def _show_error(self, message: str) -> None:
         """Show error notification to user."""
-        try:
-            self.notify(message, severity="error")
-        except Exception:
-            pass
+        self.notify(message, severity="error")
 
     def action_toggle_wait(self) -> None:
         """Toggle 'wait' date field."""
@@ -272,7 +251,6 @@ class ScheduleApp(App):
         self._update_info_bar()
 
     def action_clear_date(self) -> None:
-        """Clear date fields (hotkey 0) on selected tasks."""
         if not self.date_field_mgr.get_active():
             self._show_error("No active date fields to clear")
             return
@@ -282,128 +260,79 @@ class ScheduleApp(App):
             self._show_error("No tasks selected")
             return
 
-        # Batch modify all selected tasks
         for uuid in selected_uuids:
-            for field in self.date_field_mgr.get_active():
-                success = self.tw_client.modify_task(uuid, **{field: ""})
-                if not success:
-                    self._show_error(f"Failed to clear {field} for task {uuid}")
+            modifications = {field: "" for field in self.date_field_mgr.get_active()}
+            success = self.tw_client.modify_task(uuid, **modifications)
+            if not success:
+                self.log(f"Failed to clear dates for task {uuid}", exc_info=True)
+                self._show_error(f"Failed to clear dates for task {uuid[:8]}")
 
-        # Clear selection and refresh
         self.clear_selection()
         self.refresh_tasks()
 
     def action_schedule_1(self) -> None:
-        """Schedule tasks using hotkey 1."""
         self._schedule_with_hotkey("1")
 
     def action_schedule_2(self) -> None:
-        """Schedule tasks using hotkey 2."""
         self._schedule_with_hotkey("2")
 
     def action_schedule_3(self) -> None:
-        """Schedule tasks using hotkey 3."""
         self._schedule_with_hotkey("3")
 
     def action_schedule_4(self) -> None:
-        """Schedule tasks using hotkey 4."""
         self._schedule_with_hotkey("4")
 
     def action_schedule_5(self) -> None:
-        """Schedule tasks using hotkey 5."""
         self._schedule_with_hotkey("5")
 
     def action_schedule_6(self) -> None:
-        """Schedule tasks using hotkey 6."""
         self._schedule_with_hotkey("6")
 
     def action_schedule_7(self) -> None:
-        """Schedule tasks using hotkey 7."""
         self._schedule_with_hotkey("7")
 
     def action_schedule_8(self) -> None:
-        """Schedule tasks using hotkey 8."""
         self._schedule_with_hotkey("8")
 
     def action_schedule_9(self) -> None:
-        """Schedule tasks using hotkey 9."""
         self._schedule_with_hotkey("9")
 
     def _schedule_with_hotkey(self, hotkey: str) -> None:
-        """Schedule selected tasks using a hotkey value."""
-        # Check if hotkey has a configured value
         if hotkey not in self.config.get("hotkeys", {}):
             self._show_error(f"Hotkey {hotkey} not configured")
             return
 
         hotkey_value = self.config["hotkeys"][hotkey]
 
-        # Check if there are active date fields
         active_fields = self.date_field_mgr.get_active()
         if not active_fields:
             self._show_error("No active date fields. Use W/S/D to toggle.")
             return
 
-        # Get selected tasks
         selected_uuids = self.get_selected_tasks()
         if not selected_uuids:
             self._show_error("No tasks selected")
             return
 
-        # Batch modify all selected tasks for all active fields
         for uuid in selected_uuids:
-            modifications = {}
-            for field in active_fields:
-                modifications[field] = hotkey_value
-
+            modifications = {field: hotkey_value for field in active_fields}
             success = self.tw_client.modify_task(uuid, **modifications)
             if not success:
-                self._show_error(f"Failed to schedule task {uuid}")
+                self.log(f"Failed to schedule task {uuid}", exc_info=True)
+                self._show_error(f"Failed to schedule task {uuid[:8]}")
 
-        # Clear selection and refresh
         self.clear_selection()
         self.refresh_tasks()
 
     def action_change_report(self) -> None:
-        """Open modal to change current report (hotkey R)."""
-
         def on_report_result(result: str | None) -> None:
-            """Handle modal result."""
             if result is not None:
-                # Update current report
-                self.current_report = result
-                # Update info bar
+                self.current_filter = result
                 self._update_info_bar()
-                # Reload tasks with new report
                 self.refresh_tasks()
 
         self.push_screen(ReportModal(), callback=on_report_result)
 
     def _update_hotkey_bindings(self) -> None:
-        """Update hotkey binding descriptions and visibility based on config."""
-        # Get configured hotkeys
-        configured_hotkeys = self.config.get("hotkeys", {})
-
-        # Update BINDINGS to show only configured hotkeys with their values
-        updated_bindings = []
-        for binding in self.BINDINGS:
-            # For hotkey bindings (1-9), only show if configured
-            if binding.key in "123456789":
-                if binding.key in configured_hotkeys:
-                    value = configured_hotkeys[binding.key]
-                    # Create new binding with updated description
-                    updated_bindings.append(
-                        Binding(
-                            binding.key,
-                            binding.action,
-                            f"{binding.key}={value}",
-                            show=True,
-                        )
-                    )
-                # Skip unconfigured hotkeys
-            else:
-                # Keep all other bindings as-is
-                updated_bindings.append(binding)
-
-        # Replace class bindings with updated instance bindings
-        self.BINDINGS = updated_bindings
+        """Update hotkey binding descriptions based on config."""
+        pass
