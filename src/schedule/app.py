@@ -23,22 +23,22 @@ class ScheduleApp(App):
         Binding("tab", "toggle_selection", "Select", show=False),
         Binding("shift+a", "select_all", "All", show=False),
         # Hotkey scheduling bindings
-        Binding("0", "clear_date", "Clear", show=False),
-        Binding("1", "schedule_1", "1", show=False),
-        Binding("2", "schedule_2", "2", show=False),
-        Binding("3", "schedule_3", "3", show=False),
-        Binding("4", "schedule_4", "4", show=False),
-        Binding("5", "schedule_5", "5", show=False),
-        Binding("6", "schedule_6", "6", show=False),
-        Binding("7", "schedule_7", "7", show=False),
-        Binding("8", "schedule_8", "8", show=False),
-        Binding("9", "schedule_9", "9", show=False),
+        Binding("0", "clear_date", "0=Clear", show=True),
+        Binding("1", "schedule_1", "1", show=True),
+        Binding("2", "schedule_2", "2", show=True),
+        Binding("3", "schedule_3", "3", show=True),
+        Binding("4", "schedule_4", "4", show=True),
+        Binding("5", "schedule_5", "5", show=True),
+        Binding("6", "schedule_6", "6", show=True),
+        Binding("7", "schedule_7", "7", show=True),
+        Binding("8", "schedule_8", "8", show=True),
+        Binding("9", "schedule_9", "9", show=True),
         # Date field toggles
-        Binding("w", "toggle_wait", "Wait", show=False),
-        Binding("s", "toggle_scheduled", "Scheduled", show=False),
-        Binding("d", "toggle_due", "Due", show=False),
+        Binding("w", "toggle_wait", "W=Wait", show=True),
+        Binding("s", "toggle_scheduled", "S=Sched", show=True),
+        Binding("d", "toggle_due", "D=Due", show=True),
         # Report modal
-        Binding("r", "change_report", "Report", show=False),
+        Binding("r", "change_report", "R=Report", show=True),
     ]
 
     def __init__(self):
@@ -52,6 +52,9 @@ class ScheduleApp(App):
         self.current_report = self.config.get("default_report", "next")
         self.tasks = []
         self.selected_tasks: set[str] = set()
+
+        # Update hotkey binding visibility based on config
+        self._update_hotkey_bindings()
 
     def compose(self) -> ComposeResult:
         """Compose the application UI."""
@@ -375,3 +378,32 @@ class ScheduleApp(App):
                 self.refresh_tasks()
 
         self.push_screen(ReportModal(), callback=on_report_result)
+
+    def _update_hotkey_bindings(self) -> None:
+        """Update hotkey binding descriptions and visibility based on config."""
+        # Get configured hotkeys
+        configured_hotkeys = self.config.get("hotkeys", {})
+
+        # Update BINDINGS to show only configured hotkeys with their values
+        updated_bindings = []
+        for binding in self.BINDINGS:
+            # For hotkey bindings (1-9), only show if configured
+            if binding.key in "123456789":
+                if binding.key in configured_hotkeys:
+                    value = configured_hotkeys[binding.key]
+                    # Create new binding with updated description
+                    updated_bindings.append(
+                        Binding(
+                            binding.key,
+                            binding.action,
+                            f"{binding.key}={value}",
+                            show=True,
+                        )
+                    )
+                # Skip unconfigured hotkeys
+            else:
+                # Keep all other bindings as-is
+                updated_bindings.append(binding)
+
+        # Replace class bindings with updated instance bindings
+        self.BINDINGS = updated_bindings
