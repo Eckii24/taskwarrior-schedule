@@ -408,3 +408,132 @@ Task 6 (Hotkey System) builds on:
 - No sorting/filtering UI (configured via report only)
 - Error messages truncated to single row display
 - Static info bar (not reactive to later toggles until refresh)
+
+---
+
+## Task 5b: Multi-Select System (Complete)
+
+### Selection State Management
+
+**Location**: `src/schedule/app.py` (ScheduleApp class)
+
+**Design**:
+- Track selected task UUIDs in a set: `selected_tasks: set[str]`
+- Persistent across navigation (set persists as instance variable)
+- Uses UUID format for stable references (unchanged by other operations)
+
+**Key Methods**:
+
+#### `action_toggle_selection()`
+- Gets current cursor row index from DataTable
+- Maps row index to task in self.tasks list
+- Extracts UUID from task dictionary
+- Toggles UUID in/out of selected_tasks set
+- Updates row styling to show selection visually (● marker in ID column)
+
+#### `action_select_all()`
+- Iterates through all tasks in self.tasks
+- Adds every task UUID to selected_tasks
+- Updates row styling for all rows to show selection state
+
+#### `get_selected_tasks() -> list[str]`
+- Returns list of selected task UUIDs if any are selected
+- Fallback behavior: if no tasks selected, returns current cursor row UUID
+- This enables hotkeys to work on single task or multiple selected tasks
+- Returns empty list if no tasks available
+
+#### `clear_selection()`
+- Clears the selected_tasks set completely
+- Updates row styling for all rows to remove visual indicators
+- Called after batch operations (hotkey presses on multiple tasks)
+
+#### `_update_row_styling(row_index: int)`
+- Private helper to update visual indicator for a specific row
+- Uses DataTable.update_cell() to add ● marker when selected
+- Removes marker when not selected
+- Gracefully handles missing update_cell() method
+
+**Key Bindings**:
+```python
+Binding("tab", "toggle_selection", "Select", show=False),
+Binding("shift+a", "select_all", "All", show=False),
+```
+- Tab for individual task toggle (vim-style approach)
+- Shift+A for "select all visible" (capital A due to Textual binding syntax)
+
+### Visual Indicator Strategy
+
+**Implementation**:
+- Used ID column marker (● bullet point) to indicate selected state
+- Simple and non-intrusive: row still readable, selection obvious
+- Could upgrade to full row highlighting with CSS in future
+
+**Why this approach?**
+- Textual DataTable doesn't have built-in multi-select styling
+- Marker in first column is visible and doesn't require CSS expertise
+- Compatible with existing data layout
+
+### Integration with Hotkey System (Task 6)
+
+**Expected usage flow**:
+1. User presses Tab to select individual tasks
+2. Or Shift+A to select all visible tasks
+3. User presses hotkey (1-9) to schedule selected tasks
+4. Task 6 calls `get_selected_tasks()` to get UUIDs
+5. Task 6 calls `clear_selection()` after batch operation complete
+
+### Verification Results
+
+✅ App initializes with empty selected_tasks set
+✅ Tab binding present and mapped to toggle_selection
+✅ Shift+A binding present and mapped to select_all
+✅ get_selected_tasks() returns list type
+✅ Selection state tracks multiple UUIDs
+✅ clear_selection() empties the set
+✅ get_selected_tasks() returns all selected when populated
+✅ Methods handle missing UI gracefully (try/except)
+
+### Design Decisions
+
+**Why set instead of list?**
+- O(1) toggle operations (no iteration needed)
+- No duplicates possible
+- Idiomatic for membership testing ("is UUID selected?")
+
+**Why return current row if none selected?**
+- Enables hotkeys to work seamlessly on single task
+- User doesn't need to explicitly select before pressing hotkey
+- Consistent with single-task workflow from Task 5
+
+**Why store UUID not row index?**
+- Row index can change (with sorting/filtering in future)
+- UUID is stable identifier for the task
+- Matches TaskWarrior's native identifier system
+
+**Why visual marker in ID column?**
+- DataTable.update_cell() is stable API
+- ● marker is clear and doesn't break layout
+- Simple fallback if update_cell unavailable
+
+### Known Limitations / Future Work
+- Selection not persisted between app restarts (by spec)
+- No range selection (Shift+click style) - single select only
+- No keyboard shortcuts to deselect all (use Tab individually)
+- Marker approach doesn't scale well to 1000+ tasks (performance)
+- Could upgrade to CSS row styling for better UX
+
+### Blocking Dependencies Met
+- Task 5 ✅ DataTable and task list loading
+- App instance structure ready for Task 6 (hotkey system)
+
+### Next Task Dependencies
+Task 6 (Hotkey System) will:
+- Call `get_selected_tasks()` to batch schedule
+- Call `clear_selection()` after batch operations
+- Enable multi-task scheduling via hotkeys
+
+### Commit Info
+- **Hash**: 09f7e9b
+- **Message**: "feat(ui): multi-select with Tab and Shift+A"
+- **Files Modified**: src/schedule/app.py
+- **Lines Added**: ~90 (selection logic + bindings)
