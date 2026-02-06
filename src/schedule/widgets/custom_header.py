@@ -29,19 +29,42 @@ class CustomHeader(Container):
     }
     """
 
-    def __init__(self, filter_text: str = "", active_fields: str = ""):
+    def __init__(
+        self,
+        filter_text: str = "",
+        active_fields: str = "",
+        sort_mode: str = "default",
+        date_format: str = "absolute",
+    ):
         super().__init__()
         self.filter_text = filter_text
         self.active_fields = active_fields
+        self.sort_mode = sort_mode
+        self.date_format = date_format
 
     def compose(self) -> ComposeResult:
         yield Static("Schedule", classes="app-title")
-        status_text = f"Filter: {self.filter_text}   Active: {self.active_fields}"
-        yield Static(status_text, classes="status-line")
+        yield Static(self._build_status_text(), classes="status-line")
 
-    def update_status(self, filter_text: str, active_fields: str) -> None:
+    def _build_status_text(self) -> str:
+        return (
+            f"Filter: {self.filter_text}   "
+            f"Active: {self.active_fields}   "
+            f"Sort: {self.sort_mode}   "
+            f"Date: {self.date_format}"
+        )
+
+    def update_status(
+        self,
+        filter_text: str,
+        active_fields: str,
+        sort_mode: str = "default",
+        date_format: str = "absolute",
+    ) -> None:
         self.filter_text = filter_text
         self.active_fields = active_fields
+        self.sort_mode = sort_mode
+        self.date_format = date_format
 
         status_line = self.query_one(".status-line", Static)
-        status_line.update(f"Filter: {filter_text}   Active: {active_fields}")
+        status_line.update(self._build_status_text())

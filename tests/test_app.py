@@ -7,6 +7,7 @@ import pytest
 from textual.widgets import DataTable
 
 from schedule.app import ScheduleApp
+from schedule.widgets.custom_header import CustomHeader
 from schedule.widgets.report_modal import ReportModal
 
 
@@ -470,3 +471,170 @@ class TestScheduleAppIntegration:
                 assert mods["scheduled"] == ""
                 assert mods["due"] == ""
                 assert mods["wait"] == ""
+
+
+class TestScheduleAppSortCycling:
+    """Test sort mode cycling functionality."""
+
+    @pytest.mark.asyncio
+    async def test_cycle_sort_through_all_modes(self, mock_tw_client):
+        """Should cycle through all sort modes with o key."""
+        from schedule.app import SORT_MODES
+
+        app = ScheduleApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            assert app.sort_mode == "default"
+
+            for expected_mode in SORT_MODES[1:] + ["default"]:
+                app.action_cycle_sort()
+                await pilot.pause()
+                assert app.sort_mode == expected_mode
+
+    @pytest.mark.asyncio
+    async def test_sort_mode_shown_in_header(self, mock_tw_client):
+        """Should update header when sort mode changes."""
+        app = ScheduleApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            app.action_cycle_sort()
+            await pilot.pause()
+
+            assert app.sort_mode == "project"
+
+            header = app.query_one(CustomHeader)
+            assert header.sort_mode == "project"
+
+    @pytest.mark.asyncio
+    async def test_sort_default_refreshes_tasks(self, mock_tw_client):
+        """Cycling back to default should refresh tasks (original order)."""
+        from schedule.app import SORT_MODES
+
+        app = ScheduleApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            for _ in range(len(SORT_MODES)):
+                app.action_cycle_sort()
+                await pilot.pause()
+
+            assert app.sort_mode == "default"
+
+
+class TestScheduleAppDateFormat:
+    """Test date format toggling functionality."""
+
+    @pytest.mark.asyncio
+    async def test_toggle_date_format(self, mock_tw_client):
+        """Should toggle between absolute and relative."""
+        app = ScheduleApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            assert app.relative_dates is False
+
+            app.action_toggle_date_format()
+            await pilot.pause()
+
+            assert app.relative_dates is True
+
+            app.action_toggle_date_format()
+            await pilot.pause()
+
+            assert app.relative_dates is False
+
+    @pytest.mark.asyncio
+    async def test_date_format_shown_in_header(self, mock_tw_client):
+        """Should update header when date format changes."""
+        app = ScheduleApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            header = app.query_one(CustomHeader)
+            assert header.date_format == "absolute"
+
+            app.action_toggle_date_format()
+            await pilot.pause()
+
+            assert header.date_format == "relative"
+
+    @pytest.mark.asyncio
+    async def test_date_cells_update_on_toggle(self, mock_tw_client, sample_tasks):
+        """Should update displayed dates when toggling format."""
+        app = ScheduleApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            table = app.query_one("#task-table", DataTable)
+
+            first_uuid = sample_tasks[0]["uuid"]
+            initial_val = table.get_cell(first_uuid, "scheduled")
+
+            app.action_toggle_date_format()
+            await pilot.pause()
+
+            new_val = table.get_cell(first_uuid, "scheduled")
+            assert new_val != initial_val
+
+
+class TestScheduleAppClearSelection:
+    """Test clear all selection functionality."""
+
+    @pytest.mark.asyncio
+    async def test_x_clears_all_selections(self, mock_tw_client, sample_tasks):
+        """Should clear all selections when x is pressed."""
+        app = ScheduleApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            app.action_select_all()
+            await pilot.pause()
+            assert len(app.selected_tasks) == len(sample_tasks)
+
+            app.action_clear_all_selection()
+            await pilot.pause()
+            assert len(app.selected_tasks) == 0
+
+    @pytest.mark.asyncio
+    async def test_clear_selection_removes_visual_markers(
+        self, mock_tw_client, sample_tasks
+    ):
+        """Should remove ● markers when clearing selection."""
+        app = ScheduleApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            app.action_select_all()
+            await pilot.pause()
+
+            table = app.query_one("#task-table", DataTable)
+            first_uuid = sample_tasks[0]["uuid"]
+            marked = table.get_cell(first_uuid, "id")
+            assert "●" in str(marked)
+
+            app.action_clear_all_selection()
+            await pilot.pause()
+
+            unmarked = table.get_cell(first_uuid, "id")
+            assert "●" not in str(unmarked)
+
+
+class TestScheduleAppMKey:
+    """Test m key as alternative for toggle selection."""
+
+    @pytest.mark.asyncio
+    async def test_m_key_toggles_selection(self, mock_tw_client, sample_tasks):
+        """m key should work as alternative to Tab for toggling selection."""
+        app = ScheduleApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            assert len(app.selected_tasks) == 0
+
+            app.action_toggle_selection()
+            await pilot.pause()
+
+            first_uuid = sample_tasks[0]["uuid"]
+            assert first_uuid in app.selected_tasks

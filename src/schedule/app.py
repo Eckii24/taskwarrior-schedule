@@ -4,7 +4,7 @@ from textual.app import ComposeResult, App
 from textual.binding import Binding, BindingsMap
 from textual.widgets import Footer, DataTable, Static
 from textual.notifications import Notification
-from datetime import datetime
+from datetime import datetime, date
 
 from schedule.config import load_config, DateFieldManager
 from schedule.taskwarrior import TaskWarriorClient
@@ -12,14 +12,70 @@ from schedule.widgets.report_modal import ReportModal
 from schedule.widgets.custom_header import CustomHeader
 
 
-def format_date(date_str: str) -> str:
+def format_date(date_str: str, relative: bool = False) -> str:
+    """Format a TaskWarrior date string for display.
+
+    Args:
+        date_str: Raw date string from TaskWarrior (e.g. '20260206T000000Z')
+        relative: If True, show relative time (e.g. 'in 3 days', 'in 2 weeks')
+
+    Returns:
+        Formatted date string
+    """
     if not date_str or date_str == "-":
         return "-"
     try:
         dt = datetime.strptime(date_str[:8], "%Y%m%d")
+        if relative:
+            return _format_relative(dt)
         return dt.strftime("%a %d-%m-%Y")
     except (ValueError, IndexError):
         return date_str
+
+
+def _format_relative(dt: datetime) -> str:
+    """Format a datetime as a human-readable relative string.
+
+    Rounds to the most appropriate unit. Past dates get 'vor X',
+    future dates get 'in X'.
+    """
+    today = datetime.combine(date.today(), datetime.min.time())
+    delta = dt - today
+    days = delta.days
+
+    if days == 0:
+        return "today"
+    elif days == 1:
+        return "tomorrow"
+    elif days == -1:
+        return "yesterday"
+
+    abs_days = abs(days)
+    prefix = "in " if days > 0 else ""
+    suffix = "" if days > 0 else " ago"
+
+    if abs_days < 7:
+        label = f"{abs_days} days"
+    elif abs_days < 14:
+        label = "1 week"
+    elif abs_days < 28:
+        weeks = round(abs_days / 7)
+        label = f"{weeks} weeks"
+    elif abs_days < 45:
+        label = "1 month"
+    elif abs_days < 330:
+        months = round(abs_days / 30)
+        label = f"{months} months"
+    elif abs_days < 545:
+        label = "1 year"
+    else:
+        years = round(abs_days / 365)
+        label = f"{years} years"
+
+    return f"{prefix}{label}{suffix}"
+
+
+SORT_MODES = ["default", "project", "scheduled", "due", "description"]
 
 
 class ScheduleApp(App):
@@ -33,11 +89,15 @@ class ScheduleApp(App):
     BINDINGS = [
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
-        Binding("tab", "toggle_selection", "Select", show=True),
+        Binding("tab", "toggle_selection", "Select", show=True, priority=True),
+        Binding("m", "toggle_selection", "Mark", show=False),
+        Binding("x", "clear_all_selection", "Deselect", show=True),
         Binding("shift+a", "select_all", "All", show=True),
         Binding("s", "toggle_scheduled", "scheduled", show=True),
         Binding("d", "toggle_due", "due", show=True),
         Binding("w", "toggle_wait", "wait", show=True),
+        Binding("o", "cycle_sort", "sort", show=True),
+        Binding("t", "toggle_date_format", "date fmt", show=True),
         Binding("0", "clear_date", "clear", show=True),
         Binding("1", "schedule_1", "1", show=True),
         Binding("2", "schedule_2", "2", show=True),
@@ -67,6 +127,18 @@ class ScheduleApp(App):
         self.tasks = []
         self.selected_tasks: set[str] = set()
         self.columns_added = False
+        self.sort_mode: str = "default"
+        self.relative_dates: bool = False
+
+    def _build_row_data(self, task: dict) -> list[str]:
+        return [
+            str(task.get("id", "")),
+            task.get("description", "")[:50],
+            task.get("project", ""),
+            format_date(task.get("scheduled", "-"), self.relative_dates),
+            format_date(task.get("due", "-"), self.relative_dates),
+            format_date(task.get("wait", "-"), self.relative_dates),
+        ]
 
     def _update_binding_descriptions(self) -> None:
         hotkeys = self.config.get("hotkeys", {})
@@ -111,7 +183,13 @@ class ScheduleApp(App):
             if self.date_field_mgr.get_active()
             else "None"
         )
-        yield CustomHeader(filter_text=self.current_filter, active_fields=active_fields)
+        date_fmt = "relative" if self.relative_dates else "absolute"
+        yield CustomHeader(
+            filter_text=self.current_filter,
+            active_fields=active_fields,
+            sort_mode=self.sort_mode,
+            date_format=date_fmt,
+        )
         yield DataTable(id="task-table", cursor_type="row")
         yield Footer()
 
@@ -119,9 +197,12 @@ class ScheduleApp(App):
         table = self.query_one("#task-table", DataTable)
 
         if not self.columns_added:
-            table.add_columns(
-                "ID", "Description", "Project", "Scheduled", "Due", "Wait"
-            )
+            table.add_column("ID", key="id")
+            table.add_column("Description", key="description")
+            table.add_column("Project", key="project")
+            table.add_column("Scheduled", key="scheduled")
+            table.add_column("Due", key="due")
+            table.add_column("Wait", key="wait")
             self.columns_added = True
 
         try:
@@ -133,14 +214,7 @@ class ScheduleApp(App):
                     if not task_uuid:
                         continue
 
-                    row_data = [
-                        str(task.get("id", "")),
-                        task.get("description", "")[:50],
-                        task.get("project", ""),
-                        format_date(task.get("scheduled", "-")),
-                        format_date(task.get("due", "-")),
-                        format_date(task.get("wait", "-")),
-                    ]
+                    row_data = self._build_row_data(task)
                     table.add_row(*row_data, key=task_uuid)
             else:
                 table.add_row("", "No tasks", "", "", "", "", key="empty")
@@ -187,14 +261,18 @@ class ScheduleApp(App):
             if task_uuid:
                 self._update_row_styling(task_uuid, task.get("id", ""))
 
+    def action_clear_all_selection(self) -> None:
+        """Clear all selected tasks (x key)."""
+        self.clear_selection()
+
     def _update_row_styling(self, task_uuid: str, task_id: str) -> None:
         table = self.query_one("#task-table", DataTable)
 
         try:
             if task_uuid in self.selected_tasks:
-                table.update_cell(task_uuid, "ID", f"● {task_id}")
+                table.update_cell(task_uuid, "id", f"● {task_id}")
             else:
-                table.update_cell(task_uuid, "ID", task_id)
+                table.update_cell(task_uuid, "id", task_id)
         except Exception as e:
             self.log(f"Error updating row styling for {task_uuid}: {e}", exc_info=True)
 
@@ -245,7 +323,9 @@ class ScheduleApp(App):
             if self.date_field_mgr.get_active()
             else "None"
         )
-        header.update_status(self.current_filter, active_fields)
+        date_fmt = "relative" if self.relative_dates else "absolute"
+        sort_label = self.sort_mode
+        header.update_status(self.current_filter, active_fields, sort_label, date_fmt)
 
     def refresh_tasks(self) -> None:
         try:
@@ -263,15 +343,10 @@ class ScheduleApp(App):
                     if not task_uuid:
                         continue
 
-                    row_data = [
-                        str(task.get("id", "")),
-                        task.get("description", "")[:50],
-                        task.get("project", ""),
-                        format_date(task.get("scheduled", "-")),
-                        format_date(task.get("due", "-")),
-                        format_date(task.get("wait", "-")),
-                    ]
+                    row_data = self._build_row_data(task)
                     table.add_row(*row_data, key=task_uuid)
+
+                self._apply_sort(table)
 
                 if table.row_count > 0:
                     safe_row = min(old_cursor_row, table.row_count - 1)
@@ -386,6 +461,62 @@ class ScheduleApp(App):
 
         self.clear_selection()
         self.refresh_tasks()
+
+    def _apply_sort(self, table: DataTable) -> None:
+        if self.sort_mode == "default":
+            return
+        elif self.sort_mode == "project":
+            table.sort("project", key=lambda val: (val or "").lower())
+        elif self.sort_mode == "scheduled":
+            table.sort("scheduled", key=lambda val: val or "zzz")
+        elif self.sort_mode == "due":
+            table.sort("due", key=lambda val: val or "zzz")
+        elif self.sort_mode == "description":
+            table.sort("description", key=lambda val: (val or "").lower())
+
+    def action_cycle_sort(self) -> None:
+        """Cycle through sort modes: default → project → scheduled → due → description."""
+        current_idx = SORT_MODES.index(self.sort_mode)
+        self.sort_mode = SORT_MODES[(current_idx + 1) % len(SORT_MODES)]
+
+        table = self.query_one("#task-table", DataTable)
+        if self.sort_mode == "default":
+            self.refresh_tasks()
+        else:
+            self._apply_sort(table)
+
+        self._update_info_bar()
+
+    def action_toggle_date_format(self) -> None:
+        """Toggle between absolute and relative date display."""
+        self.relative_dates = not self.relative_dates
+        self._refresh_date_display()
+        self._update_info_bar()
+
+    def _refresh_date_display(self) -> None:
+        table = self.query_one("#task-table", DataTable)
+        for task in self.tasks:
+            task_uuid = task.get("uuid", "")
+            if not task_uuid:
+                continue
+            try:
+                table.update_cell(
+                    task_uuid,
+                    "scheduled",
+                    format_date(task.get("scheduled", "-"), self.relative_dates),
+                )
+                table.update_cell(
+                    task_uuid,
+                    "due",
+                    format_date(task.get("due", "-"), self.relative_dates),
+                )
+                table.update_cell(
+                    task_uuid,
+                    "wait",
+                    format_date(task.get("wait", "-"), self.relative_dates),
+                )
+            except Exception:
+                pass
 
     def action_change_filter(self) -> None:
         def on_report_result(result: str | None) -> None:

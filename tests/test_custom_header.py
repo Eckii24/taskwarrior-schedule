@@ -124,3 +124,56 @@ class TestCustomHeader:
 
             assert header.filter_text == ""
             assert header.active_fields == ""
+            assert header.sort_mode == "default"
+            assert header.date_format == "absolute"
+
+    @pytest.mark.asyncio
+    async def test_header_shows_sort_and_date_format(self):
+        """Should display sort mode and date format in status line."""
+
+        class TestApp(App):
+            def compose(self) -> ComposeResult:
+                yield CustomHeader(
+                    filter_text="next",
+                    active_fields="scheduled",
+                    sort_mode="project",
+                    date_format="relative",
+                )
+
+        app = TestApp()
+        async with app.run_test() as pilot:
+            header = app.query_one(CustomHeader)
+
+            assert header.sort_mode == "project"
+            assert header.date_format == "relative"
+
+            status = app.query_one(".status-line")
+            status_text = status.render()
+            assert "Sort: project" in str(status_text)
+            assert "Date: relative" in str(status_text)
+
+    @pytest.mark.asyncio
+    async def test_header_update_status_with_sort_and_date(self):
+        """Should update sort mode and date format via update_status."""
+
+        class TestApp(App):
+            def compose(self) -> ComposeResult:
+                yield CustomHeader(filter_text="next", active_fields="scheduled")
+
+        app = TestApp()
+        async with app.run_test() as pilot:
+            header = app.query_one(CustomHeader)
+
+            header.update_status(
+                "overdue", "due", sort_mode="due", date_format="relative"
+            )
+            await pilot.pause()
+
+            assert header.sort_mode == "due"
+            assert header.date_format == "relative"
+
+            status = app.query_one(".status-line")
+            status_text = status.render()
+            assert "Sort: due" in str(status_text)
+            assert "Date: relative" in str(status_text)
+            assert "Filter: overdue" in str(status_text)
