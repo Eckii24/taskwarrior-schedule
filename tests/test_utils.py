@@ -114,6 +114,7 @@ class TestScheduleAppBindings:
         assert "r" in binding_keys
         assert "q" in binding_keys
         assert "o" in binding_keys
+        assert "ctrl+o" in binding_keys
         assert "t" in binding_keys
         assert "x" in binding_keys
         assert "m" in binding_keys

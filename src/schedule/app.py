@@ -3,8 +3,10 @@
 from textual.app import ComposeResult, App
 from textual.binding import Binding, BindingsMap
 from textual.widgets import Footer, DataTable, Static
+from textual.widgets._data_table import ColumnKey
 from textual.notifications import Notification
 from datetime import datetime, date
+from rich.text import Text
 
 from schedule.config import load_config, DateFieldManager
 from schedule.taskwarrior import TaskWarriorClient
@@ -97,6 +99,9 @@ class ScheduleApp(App):
         Binding("d", "toggle_due", "due", show=True),
         Binding("w", "toggle_wait", "wait", show=True),
         Binding("o", "cycle_sort", "sort", show=True),
+        Binding("shift+o", "cycle_sort_reverse", "sort ←", show=False),
+        Binding("O", "cycle_sort_reverse", "sort ←", show=False),
+        Binding("ctrl+o", "toggle_sort_direction", "sort dir", show=True),
         Binding("t", "toggle_date_format", "date fmt", show=True),
         Binding("0", "clear_date", "clear", show=True),
         Binding("1", "schedule_1", "1", show=True),
@@ -125,9 +130,11 @@ class ScheduleApp(App):
 
         self.tw_client = TaskWarriorClient()
         self.tasks = []
+        self.task_id_by_uuid: dict[str, str] = {}
         self.selected_tasks: set[str] = set()
         self.columns_added = False
         self.sort_mode: str = "default"
+        self.sort_reverse: bool = False
         self.relative_dates: bool = False
 
     def _build_row_data(self, task: dict) -> list[str]:
@@ -222,6 +229,9 @@ class ScheduleApp(App):
             self.log(f"Error loading tasks: {e}", exc_info=True)
             table.add_row("", f"Error: {str(e)}", "", "", "", "", key="error")
 
+        self._rebuild_task_index()
+        self._update_column_headers()
+
     def action_toggle_selection(self) -> None:
         """Toggle selection of current cursor row."""
         table = self.query_one("#task-table", DataTable)
@@ -233,13 +243,13 @@ class ScheduleApp(App):
             return
 
         row_index = table.cursor_row
-        if row_index < 0 or row_index >= len(self.tasks):
+        ordered_rows = table.ordered_rows
+        if row_index < 0 or row_index >= len(ordered_rows):
             return
 
-        task = self.tasks[row_index]
-        task_uuid = task.get("uuid", "")
+        task_uuid = ordered_rows[row_index].key.value
 
-        if not task_uuid:
+        if not task_uuid or task_uuid not in self.task_id_by_uuid:
             return
 
         if task_uuid in self.selected_tasks:
@@ -247,7 +257,7 @@ class ScheduleApp(App):
         else:
             self.selected_tasks.add(task_uuid)
 
-        self._update_row_styling(task_uuid, task.get("id", ""))
+        self._update_row_styling(task_uuid, self.task_id_by_uuid[task_uuid])
 
     def action_select_all(self) -> None:
         """Select all visible tasks."""
@@ -300,9 +310,10 @@ class ScheduleApp(App):
             return []
 
         row_index = table.cursor_row
-        if 0 <= row_index < len(self.tasks):
-            task_uuid = self.tasks[row_index].get("uuid", "")
-            if task_uuid:
+        ordered_rows = table.ordered_rows
+        if 0 <= row_index < len(ordered_rows):
+            task_uuid = ordered_rows[row_index].key.value
+            if task_uuid and task_uuid in self.task_id_by_uuid:
                 return [task_uuid]
 
         return []
@@ -311,10 +322,15 @@ class ScheduleApp(App):
         """Clear all selection and remove visual indicators."""
         self.selected_tasks.clear()
 
+        for task_uuid, task_id in self.task_id_by_uuid.items():
+            self._update_row_styling(task_uuid, task_id)
+
+    def _rebuild_task_index(self) -> None:
+        self.task_id_by_uuid = {}
         for task in self.tasks:
             task_uuid = task.get("uuid", "")
             if task_uuid:
-                self._update_row_styling(task_uuid, str(task.get("id", "")))
+                self.task_id_by_uuid[task_uuid] = str(task.get("id", ""))
 
     def _update_info_bar(self) -> None:
         header = self.query_one(CustomHeader)
@@ -324,8 +340,48 @@ class ScheduleApp(App):
             else "None"
         )
         date_fmt = "relative" if self.relative_dates else "absolute"
-        sort_label = self.sort_mode
-        header.update_status(self.current_filter, active_fields, sort_label, date_fmt)
+        sort_dir = ""
+        if self.sort_mode != "default":
+            sort_dir = "↓" if not self.sort_reverse else "↑"
+        header.update_status(
+            self.current_filter, active_fields, self.sort_mode, date_fmt, sort_dir
+        )
+
+    COLUMN_LABELS = {
+        "id": "ID",
+        "description": "Description",
+        "project": "Project",
+        "scheduled": "Scheduled",
+        "due": "Due",
+        "wait": "Wait",
+    }
+
+    DATE_FIELD_COLUMNS = {"scheduled", "due", "wait"}
+
+    def _update_column_headers(self) -> None:
+        table = self.query_one("#task-table", DataTable)
+        active_fields = set(self.date_field_mgr.get_active())
+
+        for col_key, base_label in self.COLUMN_LABELS.items():
+            style_parts = []
+
+            if self.sort_mode == col_key:
+                style_parts.append("underline")
+
+            if col_key in self.DATE_FIELD_COLUMNS and col_key in active_fields:
+                style_parts.append("yellow")
+
+            style = " ".join(style_parts) if style_parts else ""
+            label = Text(base_label, style=style) if style else Text(base_label)
+
+            try:
+                col = table.columns[ColumnKey(col_key)]
+                col.label = label
+            except KeyError:
+                pass
+
+        table._update_count += 1
+        table.refresh()
 
     def refresh_tasks(self) -> None:
         try:
@@ -334,6 +390,7 @@ class ScheduleApp(App):
             old_cursor_row = table.cursor_row if table.row_count > 0 else 0
 
             self.tasks = self.tw_client.get_tasks(self.current_filter)
+            self._rebuild_task_index()
 
             table.clear()
 
@@ -353,6 +410,7 @@ class ScheduleApp(App):
                     table.move_cursor(row=safe_row, scroll=True, animate=False)
             else:
                 table.add_row("", "No tasks", "", "", "", "", key="empty")
+            self._update_column_headers()
         except Exception as e:
             self.log(f"Error refreshing tasks: {e}", exc_info=True)
             self.notify(f"Error refreshing tasks: {str(e)}", severity="error")
@@ -362,18 +420,18 @@ class ScheduleApp(App):
         self.notify(message, severity="error")
 
     def action_toggle_wait(self) -> None:
-        """Toggle 'wait' date field."""
         self.date_field_mgr.toggle("wait")
+        self._update_column_headers()
         self._update_info_bar()
 
     def action_toggle_scheduled(self) -> None:
-        """Toggle 'scheduled' date field."""
         self.date_field_mgr.toggle("scheduled")
+        self._update_column_headers()
         self._update_info_bar()
 
     def action_toggle_due(self) -> None:
-        """Toggle 'due' date field."""
         self.date_field_mgr.toggle("due")
+        self._update_column_headers()
         self._update_info_bar()
 
     def action_clear_date(self) -> None:
@@ -466,18 +524,29 @@ class ScheduleApp(App):
         if self.sort_mode == "default":
             return
         elif self.sort_mode == "project":
-            table.sort("project", key=lambda val: (val or "").lower())
+            table.sort(
+                "project",
+                key=lambda val: (val or "").lower(),
+                reverse=self.sort_reverse,
+            )
         elif self.sort_mode == "scheduled":
-            table.sort("scheduled", key=lambda val: val or "zzz")
+            table.sort(
+                "scheduled", key=lambda val: val or "zzz", reverse=self.sort_reverse
+            )
         elif self.sort_mode == "due":
-            table.sort("due", key=lambda val: val or "zzz")
+            table.sort("due", key=lambda val: val or "zzz", reverse=self.sort_reverse)
         elif self.sort_mode == "description":
-            table.sort("description", key=lambda val: (val or "").lower())
+            table.sort(
+                "description",
+                key=lambda val: (val or "").lower(),
+                reverse=self.sort_reverse,
+            )
 
     def action_cycle_sort(self) -> None:
-        """Cycle through sort modes: default → project → scheduled → due → description."""
+        """Cycle through sort modes forward: default → project → scheduled → due → description."""
         current_idx = SORT_MODES.index(self.sort_mode)
         self.sort_mode = SORT_MODES[(current_idx + 1) % len(SORT_MODES)]
+        self.sort_reverse = False
 
         table = self.query_one("#task-table", DataTable)
         if self.sort_mode == "default":
@@ -485,6 +554,35 @@ class ScheduleApp(App):
         else:
             self._apply_sort(table)
 
+        self._update_column_headers()
+        self._update_info_bar()
+
+    def action_cycle_sort_reverse(self) -> None:
+        """Cycle through sort modes backward: description → due → scheduled → project → default."""
+        current_idx = SORT_MODES.index(self.sort_mode)
+        self.sort_mode = SORT_MODES[(current_idx - 1) % len(SORT_MODES)]
+        self.sort_reverse = False
+
+        table = self.query_one("#task-table", DataTable)
+        if self.sort_mode == "default":
+            self.refresh_tasks()
+        else:
+            self._apply_sort(table)
+
+        self._update_column_headers()
+        self._update_info_bar()
+
+    def action_toggle_sort_direction(self) -> None:
+        """Toggle sort direction (ascending/descending) for current sort mode."""
+        if self.sort_mode == "default":
+            return
+
+        self.sort_reverse = not self.sort_reverse
+
+        table = self.query_one("#task-table", DataTable)
+        self._apply_sort(table)
+
+        self._update_column_headers()
         self._update_info_bar()
 
     def action_toggle_date_format(self) -> None:

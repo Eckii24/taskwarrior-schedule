@@ -493,6 +493,23 @@ class TestScheduleAppSortCycling:
                 assert app.sort_mode == expected_mode
 
     @pytest.mark.asyncio
+    async def test_cycle_sort_reverse_through_all_modes(self, mock_tw_client):
+        """Should cycle backward through sort modes with O key."""
+        from schedule.app import SORT_MODES
+
+        app = ScheduleApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            assert app.sort_mode == "default"
+
+            expected_reverse = list(reversed(SORT_MODES[1:])) + ["default"]
+            for expected_mode in expected_reverse:
+                app.action_cycle_sort_reverse()
+                await pilot.pause()
+                assert app.sort_mode == expected_mode
+
+    @pytest.mark.asyncio
     async def test_sort_mode_shown_in_header(self, mock_tw_client):
         """Should update header when sort mode changes."""
         app = ScheduleApp()
